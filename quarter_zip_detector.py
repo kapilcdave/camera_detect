@@ -38,9 +38,11 @@ def detect_v_shape(roi):
     """Detect V-shape lines in the ROI."""
     gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
     blurred = cv2.GaussianBlur(gray, (5, 5), 0)
-    edges = cv2.Canny(blurred, 40, 120)
+    # Lower thresholds for more sensitive edge detection
+    edges = cv2.Canny(blurred, 30, 90)
     
-    lines = cv2.HoughLinesP(edges, 1, np.pi / 180, threshold=35, minLineLength=25, maxLineGap=8)
+    # More lenient Hough Line parameters for easier detection
+    lines = cv2.HoughLinesP(edges, 1, np.pi / 180, threshold=25, minLineLength=20, maxLineGap=10)
     
     if lines is None:
         return None, None
@@ -53,9 +55,10 @@ def detect_v_shape(roi):
         angle = np.arctan2(y2 - y1, x2 - x1) * 180 / np.pi
         length = np.sqrt((x2 - x1)**2 + (y2 - y1)**2)
         
-        if -65 < angle < -25:  # Left side of V
+        # Wider angle range to catch acute angles (sharper V-shapes)
+        if -75 < angle < -15:  # Left side of V
             left_lines.append((line[0], length))
-        elif 25 < angle < 65:  # Right side of V
+        elif 15 < angle < 75:  # Right side of V
             right_lines.append((line[0], length))
     
     if not left_lines or not right_lines:
@@ -116,14 +119,14 @@ def main():
                 if left_line is not None and right_line is not None:
                     detected = True
                     
-                    # Draw V-shape lines
+                    # Draw V-shape lines with thicker lines for better visibility
                     x1, y1, x2, y2 = left_line
                     cv2.line(display_frame, (x_min + x1, y_min + y1), 
-                             (x_min + x2, y_min + y2), (0, 255, 0), 3)
+                             (x_min + x2, y_min + y2), (0, 255, 0), 5)
                     
                     x1, y1, x2, y2 = right_line
                     cv2.line(display_frame, (x_min + x1, y_min + y1), 
-                             (x_min + x2, y_min + y2), (0, 255, 0), 3)
+                             (x_min + x2, y_min + y2), (0, 255, 0), 5)
                 
                 # Draw neck area box
                 cv2.rectangle(display_frame, (x_min, y_min), (x_max, y_max), (0, 255, 255), 2)
