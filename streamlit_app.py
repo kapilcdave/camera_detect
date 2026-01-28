@@ -33,6 +33,7 @@ class QuarterZipProcessor(VideoProcessorBase):
 
 st.write("Click 'Start' to enable the camera.")
 webrtc_streamer(key="quarter-zip", video_processor_factory=QuarterZipProcessor,
+                rtc_configuration={"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]},
                 media_stream_constraints={"video": True, "audio": False},
                 async_processing=True)
 
