@@ -57,7 +57,6 @@ class QuarterZipDetector:
         y1 = int(top_y)
         y2 = int(bottom_y)
         
-        # Clip to frame
         h, w = frame_shape[:2]
         x1 = max(0, x1)
         y1 = max(0, y1)
@@ -104,7 +103,6 @@ class QuarterZipDetector:
             slope = dx / dy 
             angle_deg = np.degrees(np.arctan2(dy, abs(dx)))
             
-            # angle range for V-shape 
             if not (25 < angle_deg < 85): 
                 continue
                 
@@ -153,6 +151,76 @@ class QuarterZipDetector:
         
         return int(px), int(py)
 
+    def process_frame(self, frame):
+        """
+        Process a single frame: detect pose, ROI, and V-shape.
+        Returns the annotated frame and a boolean indicating if a quarter zip was detected.
+        """
+        detected_this_frame = False
+     
+        results = self.model(frame, verbose=False, stream=True)
+        
+        for result in results:
+            keypoints = result.keypoints.xy.cpu().numpy()
+            
+            for kpts in keypoints:
+                if len(kpts) == 0: continue
+                
+                roi_coords = self.get_neck_roi(kpts, frame.shape)
+                
+                if roi_coords:
+                    rx, ry, rx2, ry2 = roi_coords
+
+                    roi = frame[ry:ry2, rx:rx2]
+                    l_line_raw, r_line_raw = self.detect_v_shape(roi)
+                    
+                    if l_line_raw is not None and r_line_raw is not None:
+                        l_line_global = [l_line_raw[0]+rx, l_line_raw[1]+ry, l_line_raw[2]+rx, l_line_raw[3]+ry]
+                        r_line_global = [r_line_raw[0]+rx, r_line_raw[1]+ry, r_line_raw[2]+rx, r_line_raw[3]+ry]
+
+                        self.prev_left = self.smooth_line(l_line_global, self.prev_left)
+                        self.prev_right = self.smooth_line(r_line_global, self.prev_right)
+                        
+                        detected_this_frame = True
+                        self.locked_on_counter = self.lock_threshold 
+                        
+                   
+                    elif self.locked_on_counter > 0 and self.prev_left is not None:
+                            self.locked_on_counter -= 1
+                            detected_this_frame = True
+                    else:
+                        self.locked_on_counter = 0
+                        self.prev_left = None 
+                        self.prev_right = None
+
+                    # draw lines
+                    if detected_this_frame and self.prev_left is not None and self.prev_right is not None:     
+                        l_curr = self.prev_left
+                        r_curr = self.prev_right
+                        
+                        intersect = self.intersect_lines(l_curr, r_curr)
+                        
+                        if intersect:
+                            ix, iy = intersect
+                            l_top = (l_curr[0], l_curr[1]) if l_curr[1] < l_curr[3] else (l_curr[2], l_curr[3])
+                            r_top = (r_curr[0], r_curr[1]) if r_curr[1] < r_curr[3] else (r_curr[2], r_curr[3])
+                            
+                            cv2.line(frame, l_top, (ix, iy), (0, 255, 0), 4, cv2.LINE_AA)
+                            cv2.line(frame, r_top, (ix, iy), (0, 255, 0), 4, cv2.LINE_AA)
+                                
+                            cv2.circle(frame, (ix, iy), 6, (0, 200, 0), -1)
+                            
+                            text = "QUARTER ZIP DETECTED"
+                            t_size = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 0.8, 2)[0]
+                            tx = int((rx + rx2)/2 - t_size[0]/2)
+                            ty = ry - 15
+                           
+                            cv2.rectangle(frame, (tx-5, ty-t_size[1]-5), (tx+t_size[0]+5, ty+5), (0,0,0), -1)
+                            cv2.putText(frame, text, (tx, ty), 
+                                        cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
+                                        
+        return frame, detected_this_frame
+
     def run(self):
         cap = cv2.VideoCapture(self.camera_id)
         if not cap.isOpened():
@@ -167,70 +235,7 @@ class QuarterZipDetector:
             ret, frame = cap.read()
             if not ret: break
             
-            detected_this_frame = False
-            
-            results = self.model(frame, verbose=False, stream=True)
-            
-            for result in results:
-                keypoints = result.keypoints.xy.cpu().numpy() 
-                
-                for kpts in keypoints:
-                    if len(kpts) == 0: continue
-                    
-                    roi_coords = self.get_neck_roi(kpts, frame.shape)
-                    
-                    if roi_coords:
-                        rx, ry, rx2, ry2 = roi_coords
-                        roi_w = rx2 - rx
-                        roi_h = ry2 - ry
-                        
-                        roi = frame[ry:ry2, rx:rx2]
-                        l_line_raw, r_line_raw = self.detect_v_shape(roi)
-                        
-                        if l_line_raw is not None and r_line_raw is not None:
-                            l_line_global = [l_line_raw[0]+rx, l_line_raw[1]+ry, l_line_raw[2]+rx, l_line_raw[3]+ry]
-                            r_line_global = [r_line_raw[0]+rx, r_line_raw[1]+ry, r_line_raw[2]+rx, r_line_raw[3]+ry]
-
-                            self.prev_left = self.smooth_line(l_line_global, self.prev_left)
-                            self.prev_right = self.smooth_line(r_line_global, self.prev_right)
-                            
-                            detected_this_frame = True
-                            self.locked_on_counter = self.lock_threshold 
-                            
-                        elif self.locked_on_counter > 0 and self.prev_left is not None:
-                             self.locked_on_counter -= 1
-                             detected_this_frame = True
-                        else:
-                            self.locked_on_counter = 0
-                            self.prev_left = None 
-                            self.prev_right = None
-
-                        # draw lines
-                        if detected_this_frame and self.prev_left is not None and self.prev_right is not None:     
-                            l_curr = self.prev_left
-                            r_curr = self.prev_right
-                            
-                            intersect = self.intersect_lines(l_curr, r_curr)
-                            
-                            if intersect:
-                                ix, iy = intersect
-                                
-                                l_top = (l_curr[0], l_curr[1]) if l_curr[1] < l_curr[3] else (l_curr[2], l_curr[3])
-                                r_top = (r_curr[0], r_curr[1]) if r_curr[1] < r_curr[3] else (r_curr[2], r_curr[3])
-                                
-                                cv2.line(frame, l_top, (ix, iy), (0, 255, 0), 4, cv2.LINE_AA)
-                                cv2.line(frame, r_top, (ix, iy), (0, 255, 0), 4, cv2.LINE_AA)
-                                   
-                                cv2.circle(frame, (ix, iy), 6, (0, 200, 0), -1)
-                                
-                                text = "QUARTER ZIP DETECTED"
-                                t_size = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 0.8, 2)[0]
-                                tx = int((rx + rx2)/2 - t_size[0]/2)
-                                ty = ry - 15
-                                
-                                cv2.rectangle(frame, (tx-5, ty-t_size[1]-5), (tx+t_size[0]+5, ty+5), (0,0,0), -1)
-                                cv2.putText(frame, text, (tx, ty), 
-                                          cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
+            frame, _ = self.process_frame(frame)
             
             curr_time = time.time()
             fps = 1 / (curr_time - prev_time) if prev_time else 0
