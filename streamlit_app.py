@@ -21,30 +21,26 @@ use_webcam = st.checkbox("Use Webcam")
 
 if use_webcam:
 
-    run_detection = st.checkbox("Run Continuous Detection (Local Only)")
-    
-    frame_window = st.image([])
-    
-    if run_detection:
-        cap = cv2.VideoCapture(0)
+    st.write("Take a photo to check for a quarter zip!")
+    img_file_buffer = st.camera_input("Take a picture")
+
+    if img_file_buffer is not None:
+        # Convert to CV2 format
+        bytes_data = img_file_buffer.getvalue()
+        cv2_img = cv2.imdecode(np.frombuffer(bytes_data, np.uint8), cv2.IMREAD_COLOR)
         
-        stop_button = st.button("Stop")
+        # Process
+        processed_frame, is_detected = detector.process_frame(cv2_img)
         
-        while not stop_button:
-            ret, frame = cap.read()
-            if not ret:
-                st.error("Could not access camera.")
-                break
-                
-            frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            
-            # Process
-            processed_frame, is_detected = detector.process_frame(frame)
-            
-            # Update image
-            frame_window.image(processed_frame)
-            
-        cap.release()
+        # Display Result
+        # Convert BGR to RGB for display
+        frame_rgb = cv2.cvtColor(processed_frame, cv2.COLOR_BGR2RGB)
+        st.image(frame_rgb, caption="Processed Image")
+        
+        if is_detected:
+            st.success("Quarter Zip Detected! ✅")
+        else:
+            st.warning("No Quarter Zip Detected.")
 
 st.sidebar.markdown("### Debug Info")
 st.sidebar.info("Model: YOLOv8-pose")
