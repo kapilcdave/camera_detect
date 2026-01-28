@@ -2,45 +2,40 @@ import streamlit as st
 import cv2
 import numpy as np
 from quarter_zip_detector import QuarterZipDetector
-from PIL import Image
+from streamlit_webrtc import webrtc_streamer, VideoProcessorBase
+import av
 
 st.set_page_config(page_title="Quarter Zip Detector", layout="wide")
 
 st.title("Quarter Zip Detector 🔍")
-st.text("Detects if you are wearing a quarter zip using Pose Estimation and V-shape analysis.")
+st.text("Live detection for quarter zips using Pose Estimation.")
 
-# Initialize the detector
+# Initialize global resources
 @st.cache_resource
-def load_detector():
+def get_detector():
     return QuarterZipDetector()
 
-detector = load_detector()
+# Define the processor class for webrtc
+class QuarterZipProcessor(VideoProcessorBase):
+    def __init__(self):
+        self.detector = get_detector()
 
-# Option to use camera
-use_webcam = st.checkbox("Use Webcam")
-
-if use_webcam:
-
-    st.write("Take a photo to check for a quarter zip!")
-    img_file_buffer = st.camera_input("Take a picture")
-
-    if img_file_buffer is not None:
-        # Convert to CV2 format
-        bytes_data = img_file_buffer.getvalue()
-        cv2_img = cv2.imdecode(np.frombuffer(bytes_data, np.uint8), cv2.IMREAD_COLOR)
+    def recv(self, frame):
+        # Convert AV frame to NumPy array (BGR)
+        img = frame.to_ndarray(format="bgr24")
         
-        # Process
-        processed_frame, is_detected = detector.process_frame(cv2_img)
+        # Process the frame using our existing logic
+        # process_frame returns (annotated_frame, is_detected)
+        annotated_image, _ = self.detector.process_frame(img)
         
-        # Display Result
-        # Convert BGR to RGB for display
-        frame_rgb = cv2.cvtColor(processed_frame, cv2.COLOR_BGR2RGB)
-        st.image(frame_rgb, caption="Processed Image")
-        
-        if is_detected:
-            st.success("Quarter Zip Detected! ✅")
-        else:
-            st.warning("No Quarter Zip Detected.")
+        # Return the new frame
+        return av.VideoFrame.from_ndarray(annotated_image, format="bgr24")
+
+st.write("Click 'Start' to enable the camera.")
+webrtc_streamer(key="quarter-zip", video_processor_factory=QuarterZipProcessor,
+                media_stream_constraints={"video": True, "audio": False},
+                async_processing=True)
 
 st.sidebar.markdown("### Debug Info")
 st.sidebar.info("Model: YOLOv8-pose")
+
