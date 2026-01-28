@@ -11,10 +11,12 @@ class QuarterZipDetector:
         self.model = YOLO(model_path)
         self.camera_id = camera_id
         
+        # detection parameters
         self.conf_threshold = 0.5
         self.min_line_length = 20
         self.max_line_gap = 10
-    
+        
+        # smoothing state
         self.alpha = 0.2 
         self.prev_left = None
         self.prev_right = None
@@ -26,13 +28,10 @@ class QuarterZipDetector:
         Extracts the Region of Interest (ROI) around the neck/upper chest area.
         Returns: (x1, y1, x2, y2) or None
         """
-      
         l_shoulder = keypoints[5]
         r_shoulder = keypoints[6]
         nose = keypoints[0]
         
-        if hasattr(l_shoulder, 'conf') and l_shoulder.conf < 0.5: return None
-        if hasattr(r_shoulder, 'conf') and r_shoulder.conf < 0.5: return None
         if l_shoulder[0] == 0 or r_shoulder[0] == 0: return None
 
         sx_min = min(l_shoulder[0], r_shoulder[0])
@@ -79,6 +78,7 @@ class QuarterZipDetector:
         gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
         blurred = cv2.GaussianBlur(gray, (5, 5), 0)
         edges = cv2.Canny(blurred, 50, 150)
+        # probabilistic hough transform
         lines = cv2.HoughLinesP(edges, 1, np.pi/180, threshold=20, 
                                 minLineLength=self.min_line_length, 
                                 maxLineGap=self.max_line_gap)
@@ -92,6 +92,7 @@ class QuarterZipDetector:
         for line in lines:
             x1, y1, x2, y2 = line[0]
             
+            # ensure y2 > y1
             if y1 > y2:
                 x1, y1, x2, y2 = x2, y2, x1, y1
                 
@@ -100,7 +101,7 @@ class QuarterZipDetector:
             
             if dy == 0: continue 
             
-            slope = dx / dy 
+            # angle check
             angle_deg = np.degrees(np.arctan2(dy, abs(dx)))
             
             if not (25 < angle_deg < 85): 
@@ -157,7 +158,8 @@ class QuarterZipDetector:
         Returns the annotated frame and a boolean indicating if a quarter zip was detected.
         """
         detected_this_frame = False
-     
+        
+        # run pose estimation
         results = self.model(frame, verbose=False, stream=True)
         
         for result in results:
@@ -175,9 +177,11 @@ class QuarterZipDetector:
                     l_line_raw, r_line_raw = self.detect_v_shape(roi)
                     
                     if l_line_raw is not None and r_line_raw is not None:
+                        # convert to global coords
                         l_line_global = [l_line_raw[0]+rx, l_line_raw[1]+ry, l_line_raw[2]+rx, l_line_raw[3]+ry]
                         r_line_global = [r_line_raw[0]+rx, r_line_raw[1]+ry, r_line_raw[2]+rx, r_line_raw[3]+ry]
 
+                        # smooth
                         self.prev_left = self.smooth_line(l_line_global, self.prev_left)
                         self.prev_right = self.smooth_line(r_line_global, self.prev_right)
                         
@@ -202,6 +206,7 @@ class QuarterZipDetector:
                         
                         if intersect:
                             ix, iy = intersect
+                            # top points
                             l_top = (l_curr[0], l_curr[1]) if l_curr[1] < l_curr[3] else (l_curr[2], l_curr[3])
                             r_top = (r_curr[0], r_curr[1]) if r_curr[1] < r_curr[3] else (r_curr[2], r_curr[3])
                             
@@ -237,6 +242,7 @@ class QuarterZipDetector:
             
             frame, _ = self.process_frame(frame)
             
+            # fps calculation
             curr_time = time.time()
             fps = 1 / (curr_time - prev_time) if prev_time else 0
             prev_time = curr_time
